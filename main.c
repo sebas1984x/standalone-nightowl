@@ -44,7 +44,7 @@
 
 // Direction invert (fix “lane 2 draait verkeerd om” here)
 #define M1_DIR_INVERT  0
-#define M2_DIR_INVERT  1    // <-- set to 1 to flip lane 2 direction (your issue)
+#define M2_DIR_INVERT  0    // <-- set to 1 to flip lane 2 direction (your issue)
 
 // Enable polarity (most boards: EN low = enabled, but check your ERB schematic)
 // If your motors never move, flip this.
