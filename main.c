@@ -29,8 +29,8 @@
 #define PIN_Y_SPLIT    21   // per your note: Y split on gpio21
 
 // Buffer switches (Wisepro / TurtleNeck style)
-#define PIN_BUF_LOW    5   // CHANGE ME
-#define PIN_BUF_HIGH   6   // CHANGE ME (optional, used for hysteresis)
+#define PIN_BUF_LOW    6   // CHANGE ME
+#define PIN_BUF_HIGH   7   // CHANGE ME (optional, used for hysteresis)
 
 // ---- Stepper pins (TMC2209 in STEP/DIR/EN mode, onboard drivers) ----
 // Lane 1 motor
@@ -51,7 +51,7 @@
 #define EN_ACTIVE_LOW  1
 
 // Feeding behavior
-#define FEED_STEPS_PER_SEC   4500     // tune: how hard we push when buffer low
+#define FEED_STEPS_PER_SEC   5000     // tune: how hard we push when buffer low
 #define STEP_PULSE_US        3        // STEP pulse width
 #define LOW_DELAY_S          0.75f    // buffer low must persist this long before feeding
 #define SWAP_COOLDOWN_S      0.50f    // wait after swap before feeding again
