@@ -29,10 +29,10 @@
 #define PIN_L1_OUT     25
 // Lane 2
 #define PIN_L2_IN      22
-#define PIN_L2_OUT     12   // you specified lane 2 out = GPIO23
+#define PIN_L2_OUT     12
 
 // Y splitter switch
-#define PIN_Y_SPLIT    21   // you specified Y split = GPIO21
+#define PIN_Y_SPLIT    2
 
 // Buffer switches
 #define PIN_BUF_LOW    6
