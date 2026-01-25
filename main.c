@@ -20,27 +20,27 @@
 // ---- Switch pins (active low, pull-up) ----
 // Lane 1
 #define PIN_L1_IN      24   // CHANGE ME
-#define PIN_L1_OUT     22   // CHANGE ME
+#define PIN_L1_OUT     25   // CHANGE ME
 // Lane 2
-#define PIN_L2_IN      25   // CHANGE ME
+#define PIN_L2_IN      22   // CHANGE ME
 #define PIN_L2_OUT     23   // per your note: lane 2 out on gpio23
 
 // Y splitter switch (optional but useful)
 #define PIN_Y_SPLIT    21   // per your note: Y split on gpio21
 
 // Buffer switches (Wisepro / TurtleNeck style)
-#define PIN_BUF_LOW    26   // CHANGE ME
-#define PIN_BUF_HIGH   27   // CHANGE ME (optional, used for hysteresis)
+#define PIN_BUF_LOW    5   // CHANGE ME
+#define PIN_BUF_HIGH   6   // CHANGE ME (optional, used for hysteresis)
 
 // ---- Stepper pins (TMC2209 in STEP/DIR/EN mode, onboard drivers) ----
 // Lane 1 motor
-#define PIN_M1_EN      14   // CHANGE ME
-#define PIN_M1_DIR     15   // CHANGE ME
-#define PIN_M1_STEP    16   // CHANGE ME
+#define PIN_M1_EN      8   // CHANGE ME
+#define PIN_M1_DIR     9   // CHANGE ME
+#define PIN_M1_STEP    10   // CHANGE ME
 // Lane 2 motor
-#define PIN_M2_EN      8    // CHANGE ME
-#define PIN_M2_DIR     9    // CHANGE ME
-#define PIN_M2_STEP    10   // CHANGE ME
+#define PIN_M2_EN      14    // CHANGE ME
+#define PIN_M2_DIR     15    // CHANGE ME
+#define PIN_M2_STEP    16   // CHANGE ME
 
 // Direction invert (fix “lane 2 draait verkeerd om” here)
 #define M1_DIR_INVERT  0
