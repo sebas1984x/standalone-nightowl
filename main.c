@@ -233,16 +233,10 @@ int main() {
         prev_l1_in = l1_in_present;
         prev_l2_in = l2_in_present;
 
-        // Safety: don't autoload active lane (avoid double stepping)
-        if (autoload_lane == active_lane) {
-            autoload_lane = 0;
-            stepper_enable(&m1, false);
-            stepper_enable(&m2, false);
-        }
-
         // --- Autoload runner (background) ---
         if (autoload_lane != 0) {
-            bool timeout = time_after(get_absolute_time(), autoload_until);
+            bool timeout = (absolute_time_diff_us(get_absolute_time(), autoload_until) < 0);
+            // diff_us(now, until) is negative -> now is after until -> timed out
 
             // refresh OUT signal for lane being autoloaded
             bool done = false;
