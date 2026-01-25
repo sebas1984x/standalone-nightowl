@@ -7,18 +7,17 @@
 /*
   Standalone NightOwl / ERB RP2040 firmware (2 lanes)
 
-  Assumptions:
-  - All switches wired C/NO to GND -> active LOW when triggered
+  - Switches wired C/NO to GND -> active LOW when triggered
   - Internal pull-ups enabled on all switch pins
   - Two steppers via STEP/DIR/EN (TMC2209 onboard)
 
   Features:
-  - Auto-load: inserting filament into a lane runs that motor until lane OUT detects filament (or timeout)
-  - Buffer-driven feed: feeds only when buffer LOW has persisted for LOW_DELAY_S
-  - Auto-swap: when active lane IN is empty (spool end), arm swap.
-              When buffer requests feed and other lane is ready (OUT present), switch active lane.
-  - Optional: require Y-split to be clear before swapping (prevents collisions)
-  - Debug prints over USB serial (115200) every 0.5s
+  - Non-blocking autoload: inserting filament in a lane feeds until that lane OUT is hit (or timeout),
+    without pausing feeding on the active lane.
+  - Buffer-driven feed: feeds only when buffer LOW persists for LOW_DELAY_S
+  - Auto-swap: arm when active lane IN becomes empty (spool end). Execute swap when buffer needs feed
+    and the other lane is "ready".
+  - Optional: require Y-split to be clear before swap (recommended).
 */
 
 // ---------------------------- CONFIG ----------------------------
@@ -48,28 +47,32 @@
 #define PIN_M2_DIR     15
 #define PIN_M2_STEP    16
 
-// Direction invert (fix wrong motor direction here)
+// Direction invert (set per your mechanics)
 #define M1_DIR_INVERT  0
-#define M2_DIR_INVERT  1   // flip lane 2 direction if needed
+#define M2_DIR_INVERT  1
 
 // Enable polarity (most boards: EN low = enabled)
 #define EN_ACTIVE_LOW  1
 
-// Behavior
+// Feeding behavior
 #define FEED_STEPS_PER_SEC      5000
-#define AUTOLOAD_STEPS_PER_SEC  1200
 #define STEP_PULSE_US           3
-#define LOW_DELAY_S             0.75f
+#define LOW_DELAY_S             0.50f
 #define SWAP_COOLDOWN_S         0.50f
-#define AUTOLOAD_TIMEOUT_S      6.0f
+
+// Autoload behavior (non-blocking)
+#define AUTOLOAD_STEPS_PER_SEC  2000
+#define AUTOLOAD_TIMEOUT_S      7.0f
+
+// Debounce
 #define DEBOUNCE_MS             10
 
-// Swap safety: require Y-split to be clear before executing swap
-#define REQUIRE_Y_CLEAR_FOR_SWAP  1
+// Swap safety
+#define REQUIRE_Y_CLEAR_FOR_SWAP 1
 
-// Debug prints over USB serial
-#define DEBUG_PRINTS  1
-#define DEBUG_PERIOD_US 500000
+// Debug prints
+#define DEBUG_PRINTS            1
+#define DEBUG_PERIOD_US         500000
 
 // -------------------------- END CONFIG --------------------------
 
@@ -103,10 +106,11 @@ static inline void din_update(din_t *d) {
 }
 
 static inline bool filament_present(const din_t *d) {
-    // active-low: 0 means switch closed to GND (triggered / filament present)
+    // active-low: 0 = triggered
     return d->stable == 0;
 }
 
+// Stepper (STEP/DIR/EN)
 typedef struct {
     uint en, dir, step;
     bool dir_invert;
@@ -147,30 +151,9 @@ static inline void stepper_pulse(stepper_t *m) {
     gpio_put(m->step, 0);
 }
 
-// Run steps at rate until stop_fn true or timeout
-static void run_steps_until(stepper_t *m,
-                            int steps_per_sec,
-                            float timeout_s,
-                            bool (*stop_fn)(void*),
-                            void *ctx) {
-    const int delay_us = (steps_per_sec <= 0) ? 0 : (1000000 / steps_per_sec);
-    absolute_time_t start = get_absolute_time();
-    while (true) {
-        if (stop_fn && stop_fn(ctx)) break;
-        if (timeout_s > 0 &&
-            absolute_time_diff_us(start, get_absolute_time()) > (int64_t)(timeout_s * 1000000)) {
-            break;
-        }
-        stepper_pulse(m);
-        sleep_us(delay_us);
-    }
-}
-
-typedef struct { din_t *out; } stop_out_ctx_t;
-static bool stop_when_out_present(void *p) {
-    stop_out_ctx_t *c = (stop_out_ctx_t*)p;
-    din_update(c->out);
-    return filament_present(c->out);
+static inline bool time_after(absolute_time_t a, absolute_time_t b) {
+    // true if a is after b (a > b)
+    return absolute_time_diff_us(b, a) < 0;
 }
 
 int main() {
@@ -192,12 +175,18 @@ int main() {
     stepper_init(&m1, PIN_M1_EN, PIN_M1_DIR, PIN_M1_STEP, M1_DIR_INVERT);
     stepper_init(&m2, PIN_M2_EN, PIN_M2_DIR, PIN_M2_STEP, M2_DIR_INVERT);
 
+    // State
     int active_lane = 1;
     bool swap_armed = false;
-
     absolute_time_t low_since = get_absolute_time();
     absolute_time_t swap_cooldown_until = get_absolute_time();
 
+    // Autoload (non-blocking)
+    int autoload_lane = 0;                 // 0 none, 1 lane1, 2 lane2
+    absolute_time_t autoload_until = {0};
+    absolute_time_t last_autoload_step = {0};
+
+    // Edge detect for insert
     bool prev_l1_in = false;
     bool prev_l2_in = false;
 
@@ -206,7 +195,7 @@ int main() {
 #endif
 
     while (true) {
-        // --- Update inputs first ---
+        // --- Update all inputs ---
         din_update(&l1_in);  din_update(&l1_out);
         din_update(&l2_in);  din_update(&l2_out);
         din_update(&y_split);
@@ -223,25 +212,6 @@ int main() {
         bool y_filament_present = filament_present(&y_split);
         bool y_clear = !y_filament_present;
 
-        // --- Auto-load: new filament inserted -> push until OUT triggers ---
-        if (l1_in_present && !prev_l1_in && !l1_out_present) {
-            stepper_enable(&m1, true);
-            stepper_set_dir(&m1, true);
-            stop_out_ctx_t ctx = { .out = &l1_out };
-            run_steps_until(&m1, AUTOLOAD_STEPS_PER_SEC, AUTOLOAD_TIMEOUT_S, stop_when_out_present, &ctx);
-            stepper_enable(&m1, false);
-        }
-        if (l2_in_present && !prev_l2_in && !l2_out_present) {
-            stepper_enable(&m2, true);
-            stepper_set_dir(&m2, true);
-            stop_out_ctx_t ctx = { .out = &l2_out };
-            run_steps_until(&m2, AUTOLOAD_STEPS_PER_SEC, AUTOLOAD_TIMEOUT_S, stop_when_out_present, &ctx);
-            stepper_enable(&m2, false);
-        }
-
-        prev_l1_in = l1_in_present;
-        prev_l2_in = l2_in_present;
-
         // --- Buffer LOW timing -> need_feed ---
         if (!buffer_low) {
             low_since = get_absolute_time();
@@ -250,21 +220,78 @@ int main() {
             (absolute_time_diff_us(low_since, get_absolute_time()) > (int64_t)(LOW_DELAY_S * 1000000));
         bool need_feed = buffer_low && low_persist;
 
+        // --- Detect new filament insert -> start autoload (non-blocking) ---
+        // Only start if that lane OUT is not already present.
+        if (l1_in_present && !prev_l1_in && !l1_out_present) {
+            autoload_lane = 1;
+            autoload_until = delayed_by_ms(get_absolute_time(), (int32_t)(AUTOLOAD_TIMEOUT_S * 1000));
+        }
+        if (l2_in_present && !prev_l2_in && !l2_out_present) {
+            autoload_lane = 2;
+            autoload_until = delayed_by_ms(get_absolute_time(), (int32_t)(AUTOLOAD_TIMEOUT_S * 1000));
+        }
+        prev_l1_in = l1_in_present;
+        prev_l2_in = l2_in_present;
+
+        // Safety: don't autoload active lane (avoid double stepping)
+        if (autoload_lane == active_lane) {
+            autoload_lane = 0;
+            stepper_enable(&m1, false);
+            stepper_enable(&m2, false);
+        }
+
+        // --- Autoload runner (background) ---
+        if (autoload_lane != 0) {
+            bool timeout = time_after(get_absolute_time(), autoload_until);
+
+            // refresh OUT signal for lane being autoloaded
+            bool done = false;
+            if (autoload_lane == 1) done = l1_out_present;
+            if (autoload_lane == 2) done = l2_out_present;
+
+            if (timeout || done) {
+                if (autoload_lane == 1) stepper_enable(&m1, false);
+                if (autoload_lane == 2) stepper_enable(&m2, false);
+                autoload_lane = 0;
+            } else {
+                if (absolute_time_diff_us(last_autoload_step, get_absolute_time()) >
+                    (int64_t)(1000000 / AUTOLOAD_STEPS_PER_SEC)) {
+
+                    last_autoload_step = get_absolute_time();
+
+                    if (autoload_lane == 1) {
+                        stepper_enable(&m1, true);
+                        stepper_set_dir(&m1, true);
+                        stepper_pulse(&m1);
+                    } else if (autoload_lane == 2) {
+                        stepper_enable(&m2, true);
+                        stepper_set_dir(&m2, true);
+                        stepper_pulse(&m2);
+                    }
+                }
+            }
+        }
+
         // --- Arm swap when active lane IN is empty (spool end) ---
         if (active_lane == 1 && !l1_in_present) swap_armed = true;
         if (active_lane == 2 && !l2_in_present) swap_armed = true;
 
-        // --- Execute swap when other lane ready and buffer asks feed ---
+        // --- Lane ready condition for swapping ---
+        // We consider the lane ready when its OUT sees filament.
+        bool lane1_ready = l1_out_present;
+        bool lane2_ready = l2_out_present;
+
+        // --- Execute swap when buffer needs feed and other lane is ready ---
         bool allow_swap = need_feed && swap_armed;
 #if REQUIRE_Y_CLEAR_FOR_SWAP
         allow_swap = allow_swap && y_clear;
 #endif
         if (allow_swap) {
-            if (active_lane == 1 && l2_out_present) {
+            if (active_lane == 1 && lane2_ready) {
                 active_lane = 2;
                 swap_armed = false;
                 swap_cooldown_until = delayed_by_ms(get_absolute_time(), (int32_t)(SWAP_COOLDOWN_S * 1000));
-            } else if (active_lane == 2 && l1_out_present) {
+            } else if (active_lane == 2 && lane1_ready) {
                 active_lane = 1;
                 swap_armed = false;
                 swap_cooldown_until = delayed_by_ms(get_absolute_time(), (int32_t)(SWAP_COOLDOWN_S * 1000));
@@ -275,8 +302,8 @@ int main() {
 #if DEBUG_PRINTS
         if (absolute_time_diff_us(last_dbg, get_absolute_time()) > DEBUG_PERIOD_US) {
             last_dbg = get_absolute_time();
-            printf("A=%d armed=%d need=%d  l1in=%d l1out=%d  l2in=%d l2out=%d  y=%d yclr=%d  bufL=%d bufH=%d\n",
-                   active_lane, swap_armed, need_feed,
+            printf("A=%d armed=%d need=%d auto=%d  l1in=%d l1out=%d  l2in=%d l2out=%d  y=%d yclr=%d  bufL=%d bufH=%d\n",
+                   active_lane, swap_armed, need_feed, autoload_lane,
                    l1_in_present, l1_out_present,
                    l2_in_present, l2_out_present,
                    y_filament_present, y_clear,
@@ -289,6 +316,7 @@ int main() {
 
         if (need_feed && !in_cooldown) {
             if (active_lane == 1 && l1_out_present) {
+                // If lane1 is active, keep it feeding regardless of autoload in other lane.
                 stepper_enable(&m1, true);
                 stepper_set_dir(&m1, true);
                 stepper_pulse(&m1);
@@ -301,14 +329,13 @@ int main() {
                 sleep_us(1000000 / FEED_STEPS_PER_SEC);
                 stepper_enable(&m2, false);
             } else {
-                // active lane not ready to feed
                 sleep_ms(5);
             }
         } else {
             sleep_ms(5);
         }
 
-        (void)buffer_high; // currently not used, but kept for future hysteresis
+        (void)buffer_high; // reserved for future hysteresis
     }
 
     return 0;
