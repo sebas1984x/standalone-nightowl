@@ -44,14 +44,14 @@
 
 // Direction invert (fix “lane 2 draait verkeerd om” here)
 #define M1_DIR_INVERT  0
-#define M2_DIR_INVERT  0    // <-- set to 1 to flip lane 2 direction (your issue)
+#define M2_DIR_INVERT  1    // <-- set to 1 to flip lane 2 direction (your issue)
 
 // Enable polarity (most boards: EN low = enabled, but check your ERB schematic)
 // If your motors never move, flip this.
 #define EN_ACTIVE_LOW  1
 
 // Feeding behavior
-#define FEED_STEPS_PER_SEC   2500     // tune: how hard we push when buffer low
+#define FEED_STEPS_PER_SEC   4500     // tune: how hard we push when buffer low
 #define STEP_PULSE_US        3        // STEP pulse width
 #define LOW_DELAY_S          0.75f    // buffer low must persist this long before feeding
 #define SWAP_COOLDOWN_S      0.50f    // wait after swap before feeding again
