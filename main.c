@@ -165,6 +165,7 @@ static bool stop_when_out_present(void *p) {
 
 int main() {
     stdio_init_all();
+    sleep_ms(1500); // geef USB-serial tijd
 
 #if USE_STATUS_LED
     gpio_init(PIN_STATUS_LED);
@@ -196,6 +197,22 @@ int main() {
 
     while (true) {
         // update all inputs
+        
+      static absolute_time_t last = {0};
+if (absolute_time_diff_us(last, get_absolute_time()) > 500000) {
+    last = get_absolute_time();
+    printf("A=%d need=%d l1in=%d l1out=%d l2in=%d l2out=%d y=%d bufL=%d bufH=%d\n",
+        active_lane,
+        need_feed,
+        l1_in_present, l1_out_present,
+        l2_in_present, l2_out_present,
+        filament_present(&y_split),
+        filament_present(&buf_low),
+        filament_present(&buf_high)
+    );
+}
+
+      
         din_update(&l1_in); din_update(&l1_out);
         din_update(&l2_in); din_update(&l2_out);
         din_update(&y_split);
