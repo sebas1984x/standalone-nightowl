@@ -28,8 +28,8 @@
 #define PIN_BUF_HIGH   7
 
 // Manual REV buttons (active low, pull-up)
-#define PIN_BTN_REV_L1  19
-#define PIN_BTN_REV_L2  18
+#define PIN_BTN_REV_L1  28
+#define PIN_BTN_REV_L2  29
 
 // Speed pot (ADC) -> FEED rate
 #define USE_FEED_POT        1
