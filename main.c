@@ -79,9 +79,6 @@
 
 // -------------------------- END CONFIG --------------------------
 
-static inline bool time_reached(absolute_time_t t) {
-    return absolute_time_diff_us(get_absolute_time(), t) <= 0;
-}
 
 static inline int clamp_i(int v, int lo, int hi) {
     if (v < lo) return lo;
