@@ -507,20 +507,26 @@ int main() {
         status_led_update(led, t_us);
 
 #if DEBUG_PRINTS
-        if (absolute_time_diff_us(last_dbg, now) > DEBUG_PERIOD_US) {
-            last_dbg = now;
-            DBG_PRINTF(
-                "A=%d armed=%d man=%d feed_sps=%d  rev1=%d rev2=%d  "
-                "l1[in=%d out=%d mode=%d]  l2[in=%d out=%d mode=%d]  "
-                "y=%d yclr=%d  bufL=%d bufH=%d\n",
-                active_lane, swap_armed, any_manual, feed_sps,
-                rev_l1, rev_l2,
-                l1_in_present, l1_out_present, (int)L1.mode,
-                l2_in_present, l2_out_present, (int)L2.mode,
-                y_present, y_clear,
-                buffer_low, buffer_high
-            );
-        }
+    if (absolute_time_diff_us(last_dbg, now) > DEBUG_PERIOD_US) {
+        last_dbg = now;
+
+        // ---- TEMP ADC DEBUG ----
+        uint16_t raw = adc_read();
+        printf("ADC raw=%u\n", raw);
+        // ------------------------
+
+        DBG_PRINTF(
+            "A=%d armed=%d man=%d feed_sps=%d  rev1=%d rev2=%d  "
+            "l1[in=%d out=%d mode=%d]  l2[in=%d out=%d mode=%d]  "
+            "y=%d yclr=%d  bufL=%d bufH=%d\n",
+            active_lane, swap_armed, any_manual, feed_sps,
+            rev_l1, rev_l2,
+            l1_in_present, l1_out_present, (int)L1.mode,
+            l2_in_present, l2_out_present, (int)L2.mode,
+            y_present, y_clear,
+            buffer_low, buffer_high
+        );
+    }
 #endif
 
         sleep_ms(1);
