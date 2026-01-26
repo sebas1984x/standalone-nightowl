@@ -77,8 +77,13 @@
 #define PIN_STATUS_LED    17
 #define STATUS_LED_ACTIVE_HIGH 1
 
-// -------------------------- END CONFIG --------------------------
+// Step catch-up guard: max pulses per loop per lane
+#define STEP_CATCHUP_GUARD  50
 
+// Main loop idle sleep (smaller => higher max step rate)
+#define MAIN_LOOP_SLEEP_US  100
+
+// -------------------------- END CONFIG --------------------------
 
 static inline int clamp_i(int v, int lo, int hi) {
     if (v < lo) return lo;
@@ -270,7 +275,7 @@ static void lane_init(lane_t *L,
 static inline int32_t step_interval_us(int sps) {
     if (sps <= 0) return 1000000;
     int32_t base = (int32_t)(1000000 / sps);
-    int32_t adj = base - (int32_t)STEP_PULSE_US;
+    int32_t adj  = base - (int32_t)STEP_PULSE_US;
     if (adj < 10) adj = 10;
     return adj;
 }
@@ -282,6 +287,8 @@ static inline void lane_start_task(lane_t *L, task_mode_t mode, int sps, bool fo
 
     stepper_enable(&L->m, true);
     stepper_set_dir(&L->m, forward);
+
+    // schedule first step "now"
     L->next_step = get_absolute_time();
 
     if (mode == TASK_AUTOLOAD && timeout_s > 0) {
@@ -300,6 +307,7 @@ static void lane_update_inputs(lane_t *L) {
 }
 
 static void lane_process(lane_t *L) {
+    // Stop conditions
     if (L->mode == TASK_AUTOLOAD) {
         if (lane_out_present(L) || time_reached(L->autoload_deadline)) {
             lane_stop_task(L);
@@ -307,10 +315,22 @@ static void lane_process(lane_t *L) {
         }
     }
 
-    if (L->mode != TASK_IDLE && time_reached(L->next_step)) {
+    if (L->mode == TASK_IDLE) return;
+
+    // Catch-up stepping: don't cap at one pulse per main loop
+    int32_t interval = step_interval_us(L->steps_per_sec);
+
+    int guard = 0;
+    while (time_reached(L->next_step) && guard++ < STEP_CATCHUP_GUARD) {
         stepper_pulse(&L->m);
-        int32_t interval = step_interval_us(L->steps_per_sec);
-        L->next_step = delayed_by_us(get_absolute_time(), interval);
+
+        // advance from scheduled time to keep timing stable even with jitter
+        L->next_step = delayed_by_us(L->next_step, interval);
+    }
+
+    // If we hit the guard, we fell behind. Nudge schedule to "now" to avoid endless backlog.
+    if (guard >= STEP_CATCHUP_GUARD) {
+        L->next_step = get_absolute_time();
     }
 }
 
@@ -367,6 +387,7 @@ int main() {
 
     int active_lane = 1;
     bool swap_armed = false;
+
     absolute_time_t swap_cooldown_until = get_absolute_time();
     absolute_time_t low_since = get_absolute_time();
 
@@ -476,8 +497,7 @@ int main() {
                 if (A->mode == TASK_IDLE) {
                     lane_start_task(A, TASK_FEED, feed_sps, true, 0.0f);
                 } else if (A->mode == TASK_FEED) {
-                    // live update from pot
-                    A->steps_per_sec = feed_sps;
+                    A->steps_per_sec = feed_sps; // live update from pot
                 }
             } else {
                 if (A->mode == TASK_FEED) lane_stop_task(A);
@@ -492,7 +512,7 @@ int main() {
         L1.prev_in_present = l1_in_present;
         L2.prev_in_present = l2_in_present;
 
-        // Process lanes
+        // Process lanes (pulses + autoload stop)
         lane_process(&L1);
         lane_process(&L2);
 
@@ -507,29 +527,23 @@ int main() {
         status_led_update(led, t_us);
 
 #if DEBUG_PRINTS
-    if (absolute_time_diff_us(last_dbg, now) > DEBUG_PERIOD_US) {
-        last_dbg = now;
-
-        // ---- TEMP ADC DEBUG ----
-        uint16_t raw = adc_read();
-        printf("ADC raw=%u\n", raw);
-        // ------------------------
-
-        DBG_PRINTF(
-            "A=%d armed=%d man=%d feed_sps=%d  rev1=%d rev2=%d  "
-            "l1[in=%d out=%d mode=%d]  l2[in=%d out=%d mode=%d]  "
-            "y=%d yclr=%d  bufL=%d bufH=%d\n",
-            active_lane, swap_armed, any_manual, feed_sps,
-            rev_l1, rev_l2,
-            l1_in_present, l1_out_present, (int)L1.mode,
-            l2_in_present, l2_out_present, (int)L2.mode,
-            y_present, y_clear,
-            buffer_low, buffer_high
-        );
-    }
+        if (absolute_time_diff_us(last_dbg, now) > DEBUG_PERIOD_US) {
+            last_dbg = now;
+            DBG_PRINTF(
+                "A=%d armed=%d man=%d feed_sps=%d  rev1=%d rev2=%d  "
+                "l1[in=%d out=%d mode=%d]  l2[in=%d out=%d mode=%d]  "
+                "y=%d yclr=%d  bufL=%d bufH=%d\n",
+                active_lane, swap_armed, any_manual, feed_sps,
+                rev_l1, rev_l2,
+                l1_in_present, l1_out_present, (int)L1.mode,
+                l2_in_present, l2_out_present, (int)L2.mode,
+                y_present, y_clear,
+                buffer_low, buffer_high
+            );
+        }
 #endif
 
-        sleep_ms(1);
+        sleep_us(MAIN_LOOP_SLEEP_US);
     }
 
     return 0;
