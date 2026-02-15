@@ -1,6 +1,6 @@
 # Standalone NightOwl / ERB RP2040 Filament Switcher
 
-Standalone firmware for a **NightOwl / ERB RP2040** filament switcher.  
+Standalone firmware for a **NightOwl / ERB RP2040** filament switcher. ( https://github.com/mjonuschat/NightOwl )
 This firmware runs **fully standalone** and does **not require Klipper integration**.  
 The RP2040 handles filament loading, buffer-based feeding, and automatic lane swapping by itself.
 
